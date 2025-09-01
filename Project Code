@@ -1,62 +1,65 @@
-# STEP 1: Webcam Capture
-
+# STEP 1: Webcam Capture (JS ↔ Python)
 from IPython.display import Javascript, display
 from google.colab.output import eval_js
 from base64 import b64decode
-import cv2, io, time
+import cv2, io
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 
 def take_photo():
     js_code = Javascript('''
-      async function snapshot(){
-        const video = document.createElement('video');
-        const stream = await navigator.mediaDevices.getUserMedia({video: true});
-        document.body.appendChild(video);
-        video.srcObject = stream;
-        await video.play();
+      async function capture(){
+        const video = document.createElement('video')
+        const stream = await navigator.mediaDevices.getUserMedia({video: true})
+        document.body.appendChild(video)
+        video.srcObject = stream
+        await video.play()
 
-        // Let camera settle
-        await new Promise(resolve => setTimeout(resolve, 800));
+        // Create capture button
+        const button = document.createElement('button')
+        button.textContent = 'Capture'
+        document.body.appendChild(button)
 
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
+        await new Promise(resolve => button.onclick = resolve)
 
-        stream.getTracks()[0].stop();
-        video.remove();
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        canvas.getContext('2d').drawImage(video, 0, 0)
 
-        return canvas.toDataURL('image/jpeg', 0.9);
+        stream.getTracks()[0].stop()
+        video.remove()
+        button.remove()
+
+        return canvas.toDataURL('image/jpeg', 0.9)
       }
     ''')
     display(js_code)
-    data = eval_js("snapshot()")
+    data = eval_js("capture()")
     binary = b64decode(data.split(',')[1])
     return np.array(Image.open(io.BytesIO(binary)))
 
 
 # STEP 2: Calibration Parameters
-
 board_size = (9, 6)       # inner chessboard corners
 square_len = 25.0         # mm size of each square
 num_images = 12           # capture target
 
-# Generate 3D reference points for corners
 obj_template = np.zeros((board_size[0]*board_size[1], 3), np.float32)
 obj_template[:, :2] = np.mgrid[0:board_size[0], 0:board_size[1]].T.reshape(-1, 2)
 obj_template *= square_len
 
-object_points = []   # 3D points in real world
-image_points = []    # 2D points in image plane
+object_points = []   # 3D points
+image_points = []    # 2D points
 img_size = None
 
-# STEP 3: Image Capture Loop
 
-print("Show the Chessboard Towards the Camera")
+# STEP 3: Manual Capture Loop
+print("Show your printed chessboard to the camera and click 'Capture' each time")
 
 for idx in range(num_images):
+    print(f"Capture image {idx+1}/{num_images}")
     photo = take_photo()
     frame = cv2.cvtColor(photo, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -74,33 +77,29 @@ for idx in range(num_images):
         object_points.append(obj_template)
         image_points.append(refined)
 
-        # Draw and display
         cv2.drawChessboardCorners(frame, board_size, refined, found)
         plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         plt.axis("off")
         plt.show()
 
         print(f"Captured {idx+1}/{num_images}")
-        time.sleep(1)
     else:
-        print("Chessboard not detected")
-        time.sleep(1)
+        print("Chessboard not detected, retry this capture")
 
 
 # STEP 4: Run Calibration
-
 if object_points and image_points:
     ret, K, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
         object_points, image_points, img_size, None, None
     )
 
-    print("\n Camera Matrix (K):\n", K)
-    print("\n Distortion Coefficients:\n", dist_coeffs.ravel())
+    print("\nCamera Matrix (K):\n", K)
+    print("\nDistortion Coefficients:\n", dist_coeffs.ravel())
 
     fx, fy = K[0, 0], K[1, 1]
     cx, cy = K[0, 2], K[1, 2]
 
-    print(f"\n Focal Lengths: fx = {fx:.2f}, fy = {fy:.2f}")
-    print(f" Principal Point: cx = {cx:.2f}, cy = {cy:.2f}")
+    print(f"\nFocal Lengths: fx {fx:.2f}, fy {fy:.2f}")
+    print(f"Principal Point: cx {cx:.2f}, cy {cy:.2f}")
 else:
     print("Calibration failed. No valid chessboard detections.")
